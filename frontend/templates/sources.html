@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Fuentes de precios</title>
+  </head>
+  <body>
+    <h1>Fuentes (tiendas) para el scraping</h1>
+    <p><a href="/">Búsqueda</a> | <a href="/history">Historial</a></p>
+
+    <table border="1" cellpadding="8" cellspacing="0">
+      <thead>
+        <tr>
+          <th>Nombre</th>
+          <th>URL base</th>
+          <th>Búsqueda</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in sources %}
+        <tr>
+          <td>{{ s.name }}</td>
+          <td><a href="{{ s.base_url }}" target="_blank" rel="noopener">{{ s.base_url }}</a></td>
+          <td><small>{{ s.search_url }}</small></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p><small>Los precios se obtienen desde estas tiendas. Configuración en <code>backend/app/scraping/selectors.py</code>.</small></p>
+  </body>
+</html>

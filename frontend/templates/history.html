@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Historial de búsquedas</title>
+  </head>
+  <body>
+    <h1>Historial de búsquedas</h1>
+    <p><a href="/">Nueva búsqueda</a> | <a href="/sources">Fuentes</a></p>
+
+    <p>Clic en una búsqueda para ver el informe y descargar el PDF.</p>
+    <ul id="list"></ul>
+
+    <script>
+      (async () => {
+        const resp = await fetch("/api/searches?limit=30");
+        const data = await resp.json();
+        const ul = document.getElementById("list");
+        if (!data.items || data.items.length === 0) {
+          ul.innerHTML = "<li>No hay búsquedas todavía.</li>";
+          return;
+        }
+        ul.innerHTML = data.items.map((s) => {
+          const date = s.created_at ? new Date(s.created_at).toLocaleString("es-ES") : "";
+          return `<li><a href="/report/${s.id}">${s.location} – ${s.product_names} (${date})</a></li>`;
+        }).join("");
+      })();
+    </script>
+  </body>
+</html>

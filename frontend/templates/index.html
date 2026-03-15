@@ -6,6 +6,7 @@
   </head>
   <body>
     <h1>Búsqueda local de precios (radio 50 km)</h1>
+    <p><a href="/sources">Fuentes</a> | <a href="/history">Historial</a></p>
     <form id="search-form">
       <label>
         Ubicación:
@@ -51,7 +52,11 @@
           });
           const data = await resp.json();
           if (!resp.ok) {
-            messageEl.textContent = "Error: " + (data.detail || resp.statusText);
+            if (resp.status === 429) {
+              messageEl.textContent = "Demasiadas búsquedas. Espera un minuto y vuelve a intentar.";
+            } else {
+              messageEl.textContent = "Error: " + (data.detail || resp.statusText);
+            }
             return;
           }
           messageEl.textContent = "Listo. Ubicación geocodificada y precios obtenidos.";
