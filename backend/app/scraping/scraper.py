@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 import time
+import unicodedata
 from urllib.parse import quote_plus
 
 import httpx
@@ -101,11 +102,55 @@ def _normalize_fuel_product_name(user_input: str) -> str | None:
     return None
 
 
-def fetch_dieselogasolina_prices() -> dict[str, dict[str, float]]:
+# Mapeo comunidad/región -> nombre de provincia como en dieselogasolina.com
+_PROVINCE_ALIAS = {
+    "community of madrid": "Madrid",
+    "comunidad de madrid": "Madrid",
+    "andalusia": "Málaga",
+    "andalucía": "Málaga",
+    "comunitat valenciana": "Valencia",
+    "comunidad valenciana": "Valencia",
+    "catalonia": "Barcelona",
+    "cataluña": "Barcelona",
+    "euskadi": "Bizkaia",
+    "país vasco": "Bizkaia",
+    "galicia": "A Coruña",
+    "aragón": "Zaragoza",
+    "aragon": "Zaragoza",
+}
+
+
+def _slug_province(province: str) -> str:
+    """Normaliza nombre de provincia para comparar con cabeceras (sin acentos, minúsculas)."""
+    if not province:
+        return ""
+    s = province.strip().lower()
+    s = "".join(c for c in unicodedata.normalize("NFD", s) if unicodedata.category(c) != "Mn")
+    return s.replace(" ", "").replace("-", "")
+
+
+def _resolve_province_for_fuel(province: str | None, location_query: str | None) -> str | None:
+    """Devuelve el nombre de provincia a usar para dieselogasolina (Madrid, Málaga, etc.)."""
+    if not province and not location_query:
+        return None
+    raw = (province or location_query or "").strip()
+    if not raw:
+        return None
+    key = raw.lower()
+    if key in _PROVINCE_ALIAS:
+        return _PROVINCE_ALIAS[key]
+    for alias, name in _PROVINCE_ALIAS.items():
+        if alias in key or key in alias:
+            return name
+    return raw
+
+
+def fetch_dieselogasolina_prices(province: str | None = None) -> dict[str, dict[str, float]]:
     """
-    Obtiene precios de gasolina/diésel desde dieselogasolina.com.
-    Devuelve { "Sin Plomo 95": {"REPSOL": 1.728, "CEPSA": 1.656, ...}, ... }.
-    Si encuentra la tabla por marcas la usa; si no, usa la tabla "Hoy" como fuente única.
+    Obtiene precios desde dieselogasolina.com.
+    - Si province está indicada (ej. "Madrid", "Málaga"): usa la tabla "Un vistazo rápido"
+      por provincias y devuelve solo precios de esa zona.
+    - Si no: devuelve tabla por marcas (REPSOL, CEPSA, ...) o precio medio España.
     """
     result: dict[str, dict[str, float]] = {}
     try:
@@ -116,21 +161,37 @@ def fetch_dieselogasolina_prices() -> dict[str, dict[str, float]]:
     except Exception:
         return result
 
+    province_slug = _slug_province(province) if province else ""
+
+    # Tabla por provincias (Un vistazo rápido): filas = combustibles, columnas = provincias
     for table in soup.find_all("table"):
         rows = table.find_all("tr")
         if len(rows) < 2:
             continue
         header_cells = rows[0].find_all(["th", "td"])
-        brands: list[str] = []
+        provinces_in_table: list[str] = []
         for cell in header_cells[1:]:
-            text = cell.get_text(strip=True).upper()
-            if text and text not in ("CONVENCIONALES", "LOWCOST", "HOY", "AYER", "MAX.HISTÓRICO", "") and len(text) < 25:
-                brands.append(text)
-            img = cell.find("img")
-            if img and img.get("alt"):
-                alt = img.get("alt", "").strip().upper()
-                if alt and alt not in brands:
-                    brands.append(alt)
+            text = cell.get_text(strip=True)
+            if not text or len(text) > 30:
+                continue
+            link = cell.find("a")
+            if link and link.get("href") and "gasolineras-en-" in link.get("href", ""):
+                provinces_in_table.append(text)
+            elif text.upper() in ("MADRID", "BARCELONA", "VALENCIA", "SEVILLA", "ZARAGOZA", "TOLEDO", "MURCIA", "BIZKAIA", "GUADALAJARA", "A CORUÑA", "MÁLAGA", "MALAGA"):
+                provinces_in_table.append(text)
+            else:
+                provinces_in_table.append(text)
+        if not provinces_in_table:
+            continue
+        # Si pedimos una provincia, comprobar si está en esta tabla
+        col_index = -1
+        if province_slug:
+            for i, p in enumerate(provinces_in_table):
+                if _slug_province(p) == province_slug or province_slug in _slug_province(p) or _slug_province(p) in province_slug:
+                    col_index = i
+                    break
+            if col_index < 0:
+                continue
         for row in rows[1:]:
             cells = row.find_all(["td", "th"])
             if len(cells) < 2:
@@ -138,20 +199,58 @@ def fetch_dieselogasolina_prices() -> dict[str, dict[str, float]]:
             product_name = cells[0].get_text(strip=True)
             if not product_name or len(product_name) > 50:
                 continue
-            prices_by_brand: dict[str, float] = {}
+            prices_by_source: dict[str, float] = {}
             for i, cell in enumerate(cells[1:], start=0):
+                if province_slug and i != col_index:
+                    continue
                 price = _normalize_price(cell.get_text(strip=True))
                 if price is None or not (0.3 < price < 10.0):
                     continue
-                if i < len(brands):
-                    prices_by_brand[brands[i]] = price
-                else:
-                    prices_by_brand[f"Col{i}"] = price
-            if prices_by_brand and product_name:
-                result[product_name] = prices_by_brand
-        if len(result) >= 2 and any(len(v) > 1 for v in result.values()):
-            break
-    # Fallback: tabla con solo Hoy (precio medio España) -> una "fuente" DieseloGasolina
+                name = provinces_in_table[i] if i < len(provinces_in_table) else (province or "Zona")
+                prices_by_source[name] = price
+            if prices_by_source and product_name:
+                result[product_name] = prices_by_source
+        if result:
+            return result
+
+    # Tabla por marcas (REPSOL, CEPSA, ...) - solo si no pedíamos provincia
+    if not province_slug:
+        for table in soup.find_all("table"):
+            rows = table.find_all("tr")
+            if len(rows) < 2:
+                continue
+            header_cells = rows[0].find_all(["th", "td"])
+            brands: list[str] = []
+            for cell in header_cells[1:]:
+                text = cell.get_text(strip=True).upper()
+                if text and text not in ("CONVENCIONALES", "LOWCOST", "HOY", "AYER", "MAX.HISTÓRICO", "") and len(text) < 25:
+                    brands.append(text)
+                img = cell.find("img")
+                if img and img.get("alt"):
+                    alt = img.get("alt", "").strip().upper()
+                    if alt and alt not in brands:
+                        brands.append(alt)
+            for row in rows[1:]:
+                cells = row.find_all(["td", "th"])
+                if len(cells) < 2:
+                    continue
+                product_name = cells[0].get_text(strip=True)
+                if not product_name or len(product_name) > 50:
+                    continue
+                prices_by_brand: dict[str, float] = {}
+                for i, cell in enumerate(cells[1:], start=0):
+                    price = _normalize_price(cell.get_text(strip=True))
+                    if price is None or not (0.3 < price < 10.0):
+                        continue
+                    if i < len(brands):
+                        prices_by_brand[brands[i]] = price
+                    else:
+                        prices_by_brand[f"Col{i}"] = price
+                if prices_by_brand and product_name:
+                    result[product_name] = prices_by_brand
+            if len(result) >= 2 and any(len(v) > 1 for v in result.values()):
+                break
+    # Fallback: tabla Hoy (precio medio España)
     if not result:
         for table in soup.find_all("table"):
             for row in table.find_all("tr"):
@@ -180,9 +279,13 @@ def run_real_scraping(db, search) -> int:
 
     count = 0
 
-    # 1) Fuente dieselogasolina.com: una sola petición, tabla por marcas (Repsol, Cepsa, etc.)
+    # 1) Fuente dieselogasolina.com: precios por provincia (Madrid, Málaga, etc.) o por marcas
     time.sleep(REQUEST_DELAY_SEC)
-    fuel_prices = fetch_dieselogasolina_prices()
+    province = _resolve_province_for_fuel(
+        getattr(search, "province_region", None),
+        getattr(search, "location_query", None),
+    )
+    fuel_prices = fetch_dieselogasolina_prices(province=province)
     if fuel_prices:
         for product_name in product_names:
             canonical = _normalize_fuel_product_name(product_name)

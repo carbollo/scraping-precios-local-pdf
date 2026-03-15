@@ -96,12 +96,10 @@ def get_report_data(db: Session, search_id: int) -> dict:
         by_product[pname][sname] = r.price
 
     sources_list = sorted(sources_set)
-    IVA_PCT = 21.0
-
+    # Precios con IVA ya incluido: no añadir 21% adicional
     rows: list[dict[str, object]] = []
     subtotal = 0.0
     for product_name, prices_by_source in sorted(by_product.items()):
-        # Usar precio mínimo entre fuentes para el total y guardar el nombre de la tienda
         min_price = 0.0
         min_source_name: Optional[str] = None
         for sname, price in prices_by_source.items():
@@ -109,22 +107,16 @@ def get_report_data(db: Session, search_id: int) -> dict:
                 min_price = price
                 min_source_name = sname
 
-        iva = round(min_price * (IVA_PCT / 100), 2)
-        total_con_iva = round(min_price + iva, 2)
         subtotal += min_price
         row = {
             "product_name": product_name,
             "prices_by_source": prices_by_source,
             "best_source_name": min_source_name,
             "min_price": min_price,
-            "iva_pct": IVA_PCT,
-            "iva": iva,
-            "total_con_iva": total_con_iva,
+            "iva_incl": True,
+            "total_con_iva": round(min_price, 2),
         }
         rows.append(row)
-
-    iva_total = round(subtotal * (IVA_PCT / 100), 2)
-    total = round(subtotal + iva_total, 2)
 
     return {
         "search_id": search_id,
@@ -136,8 +128,8 @@ def get_report_data(db: Session, search_id: int) -> dict:
         "sources": sources_list,
         "products": rows,
         "subtotal": round(subtotal, 2),
-        "iva_pct": IVA_PCT,
-        "iva_total": iva_total,
-        "total": total,
+        "iva_incl": True,
+        "iva_total": 0,
+        "total": round(subtotal, 2),
         "currency": "EUR",
     }

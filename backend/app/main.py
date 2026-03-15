@@ -95,12 +95,13 @@ async def create_local_search(
     ip = request.client.host if request.client else "unknown"
     _check_rate_limit(ip)
 
-    # Geocoding de la ubicación
+    # Geocoding de la ubicación (lat, lon, provincia para precios por zona)
     coords = await geocode_with_nominatim(payload.location)
     if not coords:
         raise HTTPException(status_code=400, detail="No se pudo geocodificar la ubicación")
 
-    center_lat, center_lng = coords
+    center_lat, center_lng = coords[0], coords[1]
+    province_region = coords[2] if len(coords) > 2 else None
 
     # Crear registro de búsqueda local
     search = LocalSearch(
@@ -109,6 +110,7 @@ async def create_local_search(
         center_lng=center_lng,
         radius_km=payload.radius_km,
         product_names=",".join(payload.products),
+        province_region=province_region,
     )
     db.add(search)
     db.commit()

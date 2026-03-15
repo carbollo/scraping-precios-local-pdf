@@ -27,6 +27,7 @@ class LocalSearch(Base):
     center_lng: Mapped[float] = mapped_column(Float)
     radius_km: Mapped[float] = mapped_column(Float, default=50.0)
     product_names: Mapped[str] = mapped_column(Text)  # nombres separados por coma
+    province_region: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)  # provincia/región para precios por zona
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     price_records: Mapped[List["PriceRecord"]] = relationship(
@@ -92,6 +93,15 @@ class PriceRecord(Base):
 
 
 def init_db(engine) -> None:
-    """Crear tablas en la base de datos."""
+    """Crear tablas en la base de datos y añadir columnas nuevas si faltan."""
+    from sqlalchemy import text
+
     Base.metadata.create_all(bind=engine)
+    # Añadir province_region si la tabla ya existía sin ella
+    with engine.connect() as conn:
+        try:
+            conn.execute(text("ALTER TABLE local_searches ADD COLUMN province_region VARCHAR(100)"))
+            conn.commit()
+        except Exception:
+            conn.rollback()
 
