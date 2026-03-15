@@ -24,7 +24,7 @@ Abre http://localhost:8000 . Introduce ubicación y productos (separados por com
 4. El **Procfile** arranca: `uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT`. Railway ejecuta desde la raíz del repo.
 5. Deploy: cada push a la rama conectada despliega. La URL pública se ve en el panel.
 
-**Nota:** En Railway el disco es efímero; sin PostgreSQL los datos se pierden al reiniciar.
+**Nota:** En Railway el disco es efímero; sin PostgreSQL los datos se pierden al reiniciar. El `requirements.txt` debe estar guardado en **UTF-8**; si pip falla con "Invalid requirement" y caracteres raros, el archivo puede estar en UTF-16 (rescríbelo en UTF-8).
 
 ## Estructura
 
