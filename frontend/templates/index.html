@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Búsqueda local de precios</title>
+  </head>
+  <body>
+    <h1>Búsqueda local de precios (radio 50 km)</h1>
+    <form id="search-form">
+      <label>
+        Ubicación:
+        <input type="text" name="location" required />
+      </label>
+      <br />
+      <label>
+        Productos/servicios (separados por coma):
+        <input type="text" name="products" required />
+      </label>
+      <br />
+      <button type="submit">Buscar precios en la zona</button>
+    </form>
+
+    <pre id="result"></pre>
+
+    <script>
+      const form = document.getElementById("search-form");
+      const resultEl = document.getElementById("result");
+
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const formData = new FormData(form);
+        const location = formData.get("location");
+        const products = String(formData.get("products"))
+          .split(",")
+          .map((p) => p.trim())
+          .filter(Boolean);
+
+        const resp = await fetch("/api/local-search", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ location, products }),
+        });
+
+        const data = await resp.json();
+        resultEl.textContent = JSON.stringify(data, null, 2);
+      });
+    </script>
+  </body>
+</html>
