@@ -10,6 +10,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from .selectors import DIESELOGASOLINA_URL, FUEL_PRODUCT_ALIASES, REAL_SOURCES
+from . import minetur_api
 
 
 USER_AGENT = (
@@ -145,6 +146,39 @@ def _resolve_province_for_fuel(province: str | None, location_query: str | None)
     return raw
 
 
+def _slug_for_url(text: str) -> str:
+    """Normaliza texto para URL: minúsculas, sin acentos, espacios a guiones."""
+    if not text:
+        return ""
+    s = unicodedata.normalize("NFD", text.strip().lower())
+    s = "".join(c for c in s if unicodedata.category(c) != "Mn")
+    return s.replace(" ", "-").replace("_", "-")
+
+
+def build_dieselogasolina_search_url(
+    province_region: str | None, location_query: str | None
+) -> str | None:
+    """
+    Genera la URL de búsqueda de gasolineras en dieselogasolina.com para esa zona
+    (ej. gasolineras-en-malaga-localidad-alhaurin-de-la-torre.html).
+    Así el usuario puede abrirla en el navegador y ver el mapa/listado como en la web.
+    """
+    province = _resolve_province_for_fuel(province_region, location_query)
+    if not province:
+        return None
+    base = DIESELOGASOLINA_URL.rstrip("/")
+    prov_slug = _slug_for_url(province)
+    if not prov_slug:
+        return None
+    # Si la búsqueda es una localidad concreta (no solo provincia), añadir localidad
+    loc = (location_query or "").strip()
+    if loc and loc.lower() != province.lower() and _slug_for_url(loc) != prov_slug:
+        loc_slug = _slug_for_url(loc)
+        if loc_slug:
+            return f"{base}/gasolineras-en-{prov_slug}-localidad-{loc_slug}.html"
+    return f"{base}/gasolineras-en-{prov_slug}.html"
+
+
 def fetch_dieselogasolina_prices(province: str | None = None) -> dict[str, dict[str, float]]:
     """
     Obtiene precios desde dieselogasolina.com.
@@ -269,7 +303,8 @@ def run_real_scraping(db, search) -> int:
     """
     Ejecuta scraping real: por cada producto y cada fuente configurada obtiene
     el precio desde la web de la tienda y guarda con el nombre real de la tienda.
-    Incluye dieselogasolina.com para combustibles (gasolina, diésel).
+    Para combustibles: usa API Minetur (gasolineras con precios por ubicación en 50 km)
+    o, si falla, dieselogasolina.com por provincia/marcas.
     """
     from ..storage.repository import add_price_record, get_or_create_product, get_or_create_source
 
@@ -278,40 +313,114 @@ def run_real_scraping(db, search) -> int:
         return 0
 
     count = 0
+    center_lat = getattr(search, "center_lat", None)
+    center_lng = getattr(search, "center_lng", None)
+    radius_km = getattr(search, "radius_km", 50.0) or 50.0
 
-    # 1) Fuente dieselogasolina.com: precios por provincia (Madrid, Málaga, etc.) o por marcas
-    time.sleep(REQUEST_DELAY_SEC)
-    province = _resolve_province_for_fuel(
-        getattr(search, "province_region", None),
-        getattr(search, "location_query", None),
-    )
-    fuel_prices = fetch_dieselogasolina_prices(province=province)
-    if fuel_prices:
-        for product_name in product_names:
-            canonical = _normalize_fuel_product_name(product_name)
-            if not canonical:
-                continue
-            row = fuel_prices.get(canonical)
-            if not row:
-                for key in fuel_prices:
-                    if canonical.lower() in key.lower() or key.lower() in product_name.lower():
-                        row = fuel_prices[key]
-                        break
-            if not row:
-                continue
-            product = get_or_create_product(db, product_name)
-            for brand_name, price in row.items():
-                source = get_or_create_source(db, brand_name, base_url=DIESELOGASOLINA_URL)
-                add_price_record(
-                    db,
-                    local_search_id=search.id,
-                    source_id=source.id,
-                    product_id=product.id,
-                    price=round(price, 2),
-                    currency="EUR",
-                    establishment_name=brand_name,
-                )
-                count += 1
+    # Productos que son combustibles (para API Minetur)
+    fuel_canonicals = []
+    for p in product_names:
+        c = _normalize_fuel_product_name(p)
+        if c and c not in fuel_canonicals:
+            fuel_canonicals.append(c)
+
+    # 1) Combustibles: intentar API Minetur (gasolineras con precios por estación en el radio)
+    if fuel_canonicals and center_lat is not None and center_lng is not None:
+        time.sleep(REQUEST_DELAY_SEC)
+        stations = minetur_api.get_gas_stations_near(
+            center_lat, center_lng, radius_km, canonical_products=fuel_canonicals
+        )
+        if stations:
+            for st in stations:
+                st_name = st.get("name") or "Gasolinera"
+                source = get_or_create_source(db, st_name, base_url=DIESELOGASOLINA_URL)
+                for product_canonical, price in st.get("prices", {}).items():
+                    # Encontrar el product_name original que corresponde a este canónico
+                    product_name = product_canonical
+                    for p in product_names:
+                        if _normalize_fuel_product_name(p) == product_canonical:
+                            product_name = p
+                            break
+                    product = get_or_create_product(db, product_name)
+                    add_price_record(
+                        db,
+                        local_search_id=search.id,
+                        source_id=source.id,
+                        product_id=product.id,
+                        price=round(price, 2),
+                        currency="EUR",
+                        establishment_name=st_name,
+                        establishment_lat=st.get("lat"),
+                        establishment_lng=st.get("lng"),
+                    )
+                    count += 1
+        # Si Minetur no devolvió estaciones, usar dieselogasolina por provincia
+        if count == 0:
+            province = _resolve_province_for_fuel(
+                getattr(search, "province_region", None),
+                getattr(search, "location_query", None),
+            )
+            fuel_prices = fetch_dieselogasolina_prices(province=province)
+            if fuel_prices:
+                for product_name in product_names:
+                    canonical = _normalize_fuel_product_name(product_name)
+                    if not canonical:
+                        continue
+                    row = fuel_prices.get(canonical)
+                    if not row:
+                        for key in fuel_prices:
+                            if canonical.lower() in key.lower() or key.lower() in product_name.lower():
+                                row = fuel_prices[key]
+                                break
+                    if not row:
+                        continue
+                    product = get_or_create_product(db, product_name)
+                    for brand_name, price in row.items():
+                        source = get_or_create_source(db, brand_name, base_url=DIESELOGASOLINA_URL)
+                        add_price_record(
+                            db,
+                            local_search_id=search.id,
+                            source_id=source.id,
+                            product_id=product.id,
+                            price=round(price, 2),
+                            currency="EUR",
+                            establishment_name=brand_name,
+                        )
+                        count += 1
+    elif fuel_canonicals:
+        # Sin coordenadas: solo dieselogasolina por provincia
+        time.sleep(REQUEST_DELAY_SEC)
+        province = _resolve_province_for_fuel(
+            getattr(search, "province_region", None),
+            getattr(search, "location_query", None),
+        )
+        fuel_prices = fetch_dieselogasolina_prices(province=province)
+        if fuel_prices:
+            for product_name in product_names:
+                canonical = _normalize_fuel_product_name(product_name)
+                if not canonical:
+                    continue
+                row = fuel_prices.get(canonical)
+                if not row:
+                    for key in fuel_prices:
+                        if canonical.lower() in key.lower() or key.lower() in product_name.lower():
+                            row = fuel_prices[key]
+                            break
+                if not row:
+                    continue
+                product = get_or_create_product(db, product_name)
+                for brand_name, price in row.items():
+                    source = get_or_create_source(db, brand_name, base_url=DIESELOGASOLINA_URL)
+                    add_price_record(
+                        db,
+                        local_search_id=search.id,
+                        source_id=source.id,
+                        product_id=product.id,
+                        price=round(price, 2),
+                        currency="EUR",
+                        establishment_name=brand_name,
+                    )
+                    count += 1
 
     # 2) Resto de fuentes (Leroy Merlin, Bricodepot, etc.): búsqueda por producto
     if REAL_SOURCES:

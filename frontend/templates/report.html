@@ -7,7 +7,7 @@
   <body>
     <h1>Informe comparativo de precios</h1>
     <p><strong>Ubicación:</strong> {{ report.location }} | <strong>Radio:</strong> {{ report.radius_km }} km | <strong>Fecha búsqueda:</strong> {{ report.created_at[:10] if report.created_at else "-" }}</p>
-    <p><a href="/">Nueva búsqueda</a> | <a href="/history">Historial</a> | <a href="/sources">Fuentes</a> | <a href="/api/reports/{{ search_id }}/pdf" download>Descargar PDF contable</a></p>
+    <p><a href="/">Nueva búsqueda</a> | <a href="/history">Historial</a> | <a href="/sources">Fuentes</a> | <a href="/api/reports/{{ search_id }}/pdf" download>Descargar PDF contable</a>{% if fuel_search_url %} | <a href="{{ fuel_search_url }}" target="_blank" rel="noopener">Ver gasolineras en mapa (dieselogasolina.com)</a>{% endif %}</p>
 
     <table border="1" cellpadding="8" cellspacing="0">
       <thead>

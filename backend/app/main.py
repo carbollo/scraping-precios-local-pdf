@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .geo.geocoding import geocode_with_nominatim
 from .geo.distance import is_within_radius_km
-from .scraping.scraper import run_real_scraping
+from .scraping.scraper import build_dieselogasolina_search_url, run_real_scraping
 from .scraping.selectors import DIESELOGASOLINA_SOURCE, REAL_SOURCES
 from .storage.models import (
     Base,
@@ -123,7 +123,17 @@ async def create_local_search(
         # No fallar la petición: la búsqueda ya está guardada; el informe puede estar vacío
         pass  # En producción se podría loguear: logging.warning("Scraping failed", exc_info=e)
 
-    return {"search_id": search.id, "center_lat": center_lat, "center_lng": center_lng}
+    # URL de búsqueda en dieselogasolina.com para abrir en el navegador (mapa/listado por zona)
+    fuel_search_url = build_dieselogasolina_search_url(
+        search.province_region, search.location_query
+    )
+
+    return {
+        "search_id": search.id,
+        "center_lat": center_lat,
+        "center_lng": center_lng,
+        "fuel_search_url": fuel_search_url,
+    }
 
 
 @app.get("/api/local-search/{search_id}/prices")
@@ -153,12 +163,20 @@ def list_prices_for_search(
             "scraped_at": r.scraped_at.isoformat(),
         }
 
+    fuel_search_url = (
+        build_dieselogasolina_search_url(
+            search.province_region, search.location_query
+        )
+        if search
+        else None
+    )
     return {
         "search_id": search_id,
         "location": search.location_query,
         "radius_km": search.radius_km,
         "center_lat": search.center_lat,
         "center_lng": search.center_lng,
+        "fuel_search_url": fuel_search_url,
         "items": [to_dict(r) for r in records],
     }
 
@@ -169,9 +187,22 @@ def report_page(request: Request, search_id: int, db: Session = Depends(get_db))
     data = get_report_data(db, search_id)
     if not data:
         raise HTTPException(status_code=404, detail="Búsqueda no encontrada")
+    search = db.get(LocalSearch, search_id)
+    fuel_search_url = (
+        build_dieselogasolina_search_url(
+            search.province_region, search.location_query
+        )
+        if search
+        else None
+    )
     return templates.TemplateResponse(
         "report.html",
-        {"request": request, "search_id": search_id, "report": data},
+        {
+            "request": request,
+            "search_id": search_id,
+            "report": data,
+            "fuel_search_url": fuel_search_url,
+        },
     )
 
 
