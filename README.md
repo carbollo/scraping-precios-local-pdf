@@ -10,6 +10,7 @@ Desde la **raíz del proyecto**:
 python -m venv .venv
 .venv\Scripts\activate   # Windows
 pip install -r requirements.txt
+playwright install chromium   # para extraer listado de gasolineras desde dieselogasolina.com
 uvicorn backend.app.main:app --reload
 ```
 

@@ -11,6 +11,7 @@ from bs4 import BeautifulSoup
 
 from .selectors import DIESELOGASOLINA_URL, FUEL_PRODUCT_ALIASES, REAL_SOURCES
 from . import minetur_api
+from . import dieselogasolina_browser
 
 
 USER_AGENT = (
@@ -324,18 +325,21 @@ def run_real_scraping(db, search) -> int:
         if c and c not in fuel_canonicals:
             fuel_canonicals.append(c)
 
-    # 1) Combustibles: intentar API Minetur (gasolineras con precios por estación en el radio)
-    if fuel_canonicals and center_lat is not None and center_lng is not None:
+    # 1) Combustibles: primero intentar listado desde la web dieselogasolina.com (misma búsqueda que el usuario ve)
+    fuel_search_url = build_dieselogasolina_search_url(
+        getattr(search, "province_region", None),
+        getattr(search, "location_query", None),
+    )
+    if fuel_canonicals and fuel_search_url:
         time.sleep(REQUEST_DELAY_SEC)
-        stations = minetur_api.get_gas_stations_near(
-            center_lat, center_lng, radius_km, canonical_products=fuel_canonicals
+        stations = dieselogasolina_browser.fetch_gas_stations_from_dieselogasolina_page(
+            fuel_search_url
         )
         if stations:
             for st in stations:
                 st_name = st.get("name") or "Gasolinera"
                 source = get_or_create_source(db, st_name, base_url=DIESELOGASOLINA_URL)
                 for product_canonical, price in st.get("prices", {}).items():
-                    # Encontrar el product_name original que corresponde a este canónico
                     product_name = product_canonical
                     for p in product_names:
                         if _normalize_fuel_product_name(p) == product_canonical:
@@ -350,11 +354,38 @@ def run_real_scraping(db, search) -> int:
                         price=round(price, 2),
                         currency="EUR",
                         establishment_name=st_name,
-                        establishment_lat=st.get("lat"),
-                        establishment_lng=st.get("lng"),
                     )
                     count += 1
-        # Si Minetur no devolvió estaciones, usar dieselogasolina por provincia
+        # Si la web dieselogasolina no devolvió filas, intentar API Minetur (por coordenadas)
+        if count == 0 and center_lat is not None and center_lng is not None:
+            time.sleep(REQUEST_DELAY_SEC)
+            stations = minetur_api.get_gas_stations_near(
+                center_lat, center_lng, radius_km, canonical_products=fuel_canonicals
+            )
+            if stations:
+                for st in stations:
+                    st_name = st.get("name") or "Gasolinera"
+                    source = get_or_create_source(db, st_name, base_url=DIESELOGASOLINA_URL)
+                    for product_canonical, price in st.get("prices", {}).items():
+                        product_name = product_canonical
+                        for p in product_names:
+                            if _normalize_fuel_product_name(p) == product_canonical:
+                                product_name = p
+                                break
+                        product = get_or_create_product(db, product_name)
+                        add_price_record(
+                            db,
+                            local_search_id=search.id,
+                            source_id=source.id,
+                            product_id=product.id,
+                            price=round(price, 2),
+                            currency="EUR",
+                            establishment_name=st_name,
+                            establishment_lat=st.get("lat"),
+                            establishment_lng=st.get("lng"),
+                        )
+                        count += 1
+        # Si tampoco Minetur, usar tabla por provincia (dieselogasolina HTML estático)
         if count == 0:
             province = _resolve_province_for_fuel(
                 getattr(search, "province_region", None),
