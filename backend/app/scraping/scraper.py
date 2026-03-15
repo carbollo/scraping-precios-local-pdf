@@ -8,7 +8,7 @@ from urllib.parse import quote_plus
 import httpx
 from bs4 import BeautifulSoup
 
-from .selectors import REAL_SOURCES
+from .selectors import DIESELOGASOLINA_URL, FUEL_PRODUCT_ALIASES, REAL_SOURCES
 
 
 USER_AGENT = (
@@ -88,34 +88,147 @@ def fetch_price_from_source(product_query: str, source: dict) -> tuple[float | N
         return None, name
 
 
+def _normalize_fuel_product_name(user_input: str) -> str | None:
+    """Devuelve el nombre canónico del combustible si matchea (ej. 'gasolina 95' -> 'Sin Plomo 95')."""
+    key = user_input.strip().lower()
+    if not key:
+        return None
+    if key in FUEL_PRODUCT_ALIASES:
+        return FUEL_PRODUCT_ALIASES[key]
+    for alias, canonical in FUEL_PRODUCT_ALIASES.items():
+        if alias in key or key in alias:
+            return canonical
+    return None
+
+
+def fetch_dieselogasolina_prices() -> dict[str, dict[str, float]]:
+    """
+    Obtiene precios de gasolina/diésel desde dieselogasolina.com.
+    Devuelve { "Sin Plomo 95": {"REPSOL": 1.728, "CEPSA": 1.656, ...}, ... }.
+    Si encuentra la tabla por marcas la usa; si no, usa la tabla "Hoy" como fuente única.
+    """
+    result: dict[str, dict[str, float]] = {}
+    try:
+        with httpx.Client(timeout=15.0, follow_redirects=True, headers={"User-Agent": USER_AGENT}) as client:
+            resp = client.get(DIESELOGASOLINA_URL)
+            resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "html.parser")
+    except Exception:
+        return result
+
+    for table in soup.find_all("table"):
+        rows = table.find_all("tr")
+        if len(rows) < 2:
+            continue
+        header_cells = rows[0].find_all(["th", "td"])
+        brands: list[str] = []
+        for cell in header_cells[1:]:
+            text = cell.get_text(strip=True).upper()
+            if text and text not in ("CONVENCIONALES", "LOWCOST", "HOY", "AYER", "MAX.HISTÓRICO", "") and len(text) < 25:
+                brands.append(text)
+            img = cell.find("img")
+            if img and img.get("alt"):
+                alt = img.get("alt", "").strip().upper()
+                if alt and alt not in brands:
+                    brands.append(alt)
+        for row in rows[1:]:
+            cells = row.find_all(["td", "th"])
+            if len(cells) < 2:
+                continue
+            product_name = cells[0].get_text(strip=True)
+            if not product_name or len(product_name) > 50:
+                continue
+            prices_by_brand: dict[str, float] = {}
+            for i, cell in enumerate(cells[1:], start=0):
+                price = _normalize_price(cell.get_text(strip=True))
+                if price is None or not (0.3 < price < 10.0):
+                    continue
+                if i < len(brands):
+                    prices_by_brand[brands[i]] = price
+                else:
+                    prices_by_brand[f"Col{i}"] = price
+            if prices_by_brand and product_name:
+                result[product_name] = prices_by_brand
+        if len(result) >= 2 and any(len(v) > 1 for v in result.values()):
+            break
+    # Fallback: tabla con solo Hoy (precio medio España) -> una "fuente" DieseloGasolina
+    if not result:
+        for table in soup.find_all("table"):
+            for row in table.find_all("tr"):
+                cells = row.find_all(["td", "th"])
+                if len(cells) >= 2:
+                    product_name = cells[0].get_text(strip=True)
+                    price = _normalize_price(cells[1].get_text(strip=True))
+                    if product_name and price and 0.3 < price < 10.0 and len(product_name) < 50:
+                        result[product_name] = {"DieseloGasolina.com": price}
+            if result:
+                break
+    return result
+
+
 def run_real_scraping(db, search) -> int:
     """
     Ejecuta scraping real: por cada producto y cada fuente configurada obtiene
     el precio desde la web de la tienda y guarda con el nombre real de la tienda.
+    Incluye dieselogasolina.com para combustibles (gasolina, diésel).
     """
     from ..storage.repository import add_price_record, get_or_create_product, get_or_create_source
 
     product_names = [p.strip() for p in search.product_names.split(",") if p.strip()]
-    if not product_names or not REAL_SOURCES:
+    if not product_names:
         return 0
 
     count = 0
-    for product_name in product_names:
-        product = get_or_create_product(db, product_name)
-        for source_config in REAL_SOURCES:
-            time.sleep(REQUEST_DELAY_SEC)
-            price, store_name = fetch_price_from_source(product_name, source_config)
-            if price is None:
+
+    # 1) Fuente dieselogasolina.com: una sola petición, tabla por marcas (Repsol, Cepsa, etc.)
+    time.sleep(REQUEST_DELAY_SEC)
+    fuel_prices = fetch_dieselogasolina_prices()
+    if fuel_prices:
+        for product_name in product_names:
+            canonical = _normalize_fuel_product_name(product_name)
+            if not canonical:
                 continue
-            source = get_or_create_source(db, store_name, base_url=source_config.get("base_url") or "")
-            add_price_record(
-                db,
-                local_search_id=search.id,
-                source_id=source.id,
-                product_id=product.id,
-                price=round(price, 2),
-                currency="EUR",
-                establishment_name=store_name,
-            )
-            count += 1
+            row = fuel_prices.get(canonical)
+            if not row:
+                for key in fuel_prices:
+                    if canonical.lower() in key.lower() or key.lower() in product_name.lower():
+                        row = fuel_prices[key]
+                        break
+            if not row:
+                continue
+            product = get_or_create_product(db, product_name)
+            for brand_name, price in row.items():
+                source = get_or_create_source(db, brand_name, base_url=DIESELOGASOLINA_URL)
+                add_price_record(
+                    db,
+                    local_search_id=search.id,
+                    source_id=source.id,
+                    product_id=product.id,
+                    price=round(price, 2),
+                    currency="EUR",
+                    establishment_name=brand_name,
+                )
+                count += 1
+
+    # 2) Resto de fuentes (Leroy Merlin, Bricodepot, etc.): búsqueda por producto
+    if REAL_SOURCES:
+        for product_name in product_names:
+            product = get_or_create_product(db, product_name)
+            for source_config in REAL_SOURCES:
+                time.sleep(REQUEST_DELAY_SEC)
+                price, store_name = fetch_price_from_source(product_name, source_config)
+                if price is None:
+                    continue
+                source = get_or_create_source(db, store_name, base_url=source_config.get("base_url") or "")
+                add_price_record(
+                    db,
+                    local_search_id=search.id,
+                    source_id=source.id,
+                    product_id=product.id,
+                    price=round(price, 2),
+                    currency="EUR",
+                    establishment_name=store_name,
+                )
+                count += 1
+
     return count

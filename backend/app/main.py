@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from .geo.geocoding import geocode_with_nominatim
 from .geo.distance import is_within_radius_km
 from .scraping.scraper import run_real_scraping
-from .scraping.selectors import REAL_SOURCES
+from .scraping.selectors import DIESELOGASOLINA_SOURCE, REAL_SOURCES
 from .storage.models import (
     Base,
     LocalSearch,
@@ -193,7 +193,7 @@ def sources_page(request: Request):
     """Lista de fuentes (tiendas) configuradas para el scraping."""
     sources = [
         {"name": s.get("name", ""), "base_url": s.get("base_url", ""), "search_url": s.get("search_url", "")}
-        for s in REAL_SOURCES
+        for s in ([DIESELOGASOLINA_SOURCE] + list(REAL_SOURCES))
     ]
     return templates.TemplateResponse(
         "sources.html",

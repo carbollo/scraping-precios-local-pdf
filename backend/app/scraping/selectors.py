@@ -1,6 +1,32 @@
 """Configuración de fuentes reales: nombre de la tienda, URL de búsqueda y selectores."""
 from __future__ import annotations
 
+# Fuente especial: dieselogasolina.com (una sola página con tablas de precios por marca).
+# Ver scraper.fetch_dieselogasolina_prices()
+DIESELOGASOLINA_URL = "https://www.dieselogasolina.com/"
+DIESELOGASOLINA_SOURCE = {
+    "name": "DieseloGasolina.com (combustibles)",
+    "base_url": DIESELOGASOLINA_URL,
+    "search_url": DIESELOGASOLINA_URL,
+}
+
+# Alias para que el usuario pueda buscar "gasolina 95", "diesel" etc. y matchear con la tabla.
+FUEL_PRODUCT_ALIASES = {
+    "sin plomo 95": "Sin Plomo 95",
+    "sp95": "Sin Plomo 95",
+    "gasolina 95": "Sin Plomo 95",
+    "sin plomo 98": "Sin Plomo 98",
+    "sp98": "Sin Plomo 98",
+    "gasolina 98": "Sin Plomo 98",
+    "gasoleo a": "Gasóleo A",
+    "gasóleo a": "Gasóleo A",
+    "diesel a": "Gasóleo A",
+    "gasoleo a+": "Gasóleo A+",
+    "gasóleo a+": "Gasóleo A+",
+    "glp": "GLP",
+    "autogas": "GLP",
+}
+
 # Cada fuente es una tienda real: nombre que se muestra en el informe y cómo extraer el precio.
 # name: nombre real de la tienda (aparece en el PDF/informe).
 # search_url: URL de búsqueda, use {query} donde va el texto (se reemplaza por el producto).
