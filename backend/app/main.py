@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .geo.geocoding import geocode_with_nominatim
 from .geo.distance import is_within_radius_km
-from .scraping.engine import run_mock_scraping
+from .scraping.scraper import run_real_scraping
 from .storage.models import (
     Base,
     LocalSearch,
@@ -92,8 +92,8 @@ async def create_local_search(
     db.commit()
     db.refresh(search)
 
-    # Ejecutar scraping (mock que genera precios de ejemplo por producto/fuente)
-    run_mock_scraping(db, search)
+    # Scraping real: precios y nombre real de cada tienda
+    run_real_scraping(db, search)
 
     return {"search_id": search.id, "center_lat": center_lat, "center_lng": center_lng}
 
