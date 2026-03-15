@@ -422,9 +422,12 @@ def run_real_scraping(db, search) -> int:
                     )
                     count += 1
 
-    # 2) Resto de fuentes (Leroy Merlin, Bricodepot, etc.): búsqueda por producto
+    # 2) Resto de fuentes (Leroy Merlin, Bricodepot, etc.): solo para productos que NO son combustibles
+    # (evitar buscar "Sin plomo 95" en tiendas de bricolaje y que devuelvan aceites u otros productos)
     if REAL_SOURCES:
         for product_name in product_names:
+            if _normalize_fuel_product_name(product_name) is not None:
+                continue  # combustibles solo vienen de Minetur/dieselogasolina
             product = get_or_create_product(db, product_name)
             for source_config in REAL_SOURCES:
                 time.sleep(REQUEST_DELAY_SEC)
