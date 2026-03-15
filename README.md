@@ -17,14 +17,18 @@ Abre http://localhost:8000 . Introduce ubicación y productos (separados por com
 
 ## Despliegue en Railway
 
-- Conectar el repositorio a Railway.
-- Añadir PostgreSQL (add-on) y usar la variable `DATABASE_URL` que proporciona Railway.
-- El `Procfile` arranca con: `uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT`.
+1. Conectar el repositorio a Railway (nuevo proyecto desde GitHub).
+2. Añadir el add-on **PostgreSQL**; Railway crea la variable `DATABASE_URL` automáticamente.
+3. En Variables de entorno no hace falta añadir nada más si usas PostgreSQL (la app usa `DATABASE_URL`).
+4. El **Procfile** arranca: `uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT`. Railway ejecuta desde la raíz del repo.
+5. Deploy: cada push a la rama conectada despliega. La URL pública se ve en el panel.
+
+**Nota:** En Railway el disco es efímero; sin PostgreSQL los datos se pierden al reiniciar.
 
 ## Estructura
 
-- `backend/app/main.py`: FastAPI, rutas y geocoding.
-- `backend/app/scraping/engine.py`: Motor de scraping (mock con precios de ejemplo).
+- `backend/app/main.py`: FastAPI, rutas, geocoding, rate limit, historial y fuentes.
+- `backend/app/scraping/scraper.py`: Scraping real (tiendas en `selectors.py`).
 - `backend/app/storage/`: Modelos y repositorio (búsquedas, fuentes, productos, precios).
 - `backend/app/pdf/`: Informe comparativo y generación del PDF con ReportLab.
-- `frontend/templates/`: Plantillas HTML (index, report).
+- `frontend/templates/`: Plantillas HTML (index, report, sources, history).
