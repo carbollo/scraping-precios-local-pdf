@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Informe comparativo - Precios zona local</title>
+  </head>
+  <body>
+    <h1>Informe comparativo de precios</h1>
+    <p><strong>Ubicación:</strong> {{ report.location }} | <strong>Radio:</strong> {{ report.radius_km }} km</p>
+    <p><a href="/">Nueva búsqueda</a> | <a href="/api/reports/{{ search_id }}/pdf" download>Descargar PDF contable</a></p>
+
+    <table border="1" cellpadding="8" cellspacing="0">
+      <thead>
+        <tr>
+          <th>Producto / Servicio</th>
+          {% for s in report.sources %}
+          <th>{{ s }}</th>
+          {% endfor %}
+          <th>IVA (%)</th>
+          <th>Total ({{ report.currency }})</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in report.products %}
+        <tr>
+          <td>{{ row.product_name }}</td>
+          {% for s in report.sources %}
+          <td>{{ row.prices_by_source.get(s, "-") }}</td>
+          {% endfor %}
+          <td>{{ row.iva_pct }}</td>
+          <td>{{ row.total_con_iva }}</td>
+        </tr>
+        {% endfor %}
+        <tr>
+          <td><strong>SUBTOTAL</strong></td>
+          {% for s in report.sources %}<td></td>{% endfor %}
+          <td></td>
+          <td><strong>{{ report.subtotal }}</strong></td>
+        </tr>
+        <tr>
+          <td><strong>IVA</strong></td>
+          {% for s in report.sources %}<td></td>{% endfor %}
+          <td></td>
+          <td><strong>{{ report.iva_total }}</strong></td>
+        </tr>
+        <tr>
+          <td><strong>TOTAL</strong></td>
+          {% for s in report.sources %}<td></td>{% endfor %}
+          <td></td>
+          <td><strong>{{ report.total }}</strong></td>
+        </tr>
+      </tbody>
+    </table>
+  </body>
+</html>

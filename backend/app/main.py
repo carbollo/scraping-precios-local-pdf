@@ -4,8 +4,8 @@ import os
 from typing import List, Optional
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from sqlalchemy import create_engine
@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .geo.geocoding import geocode_with_nominatim
 from .geo.distance import is_within_radius_km
+from .scraping.engine import run_mock_scraping
 from .storage.models import (
     Base,
     LocalSearch,
@@ -21,6 +22,9 @@ from .storage.models import (
     Source,
     init_db,
 )
+from .storage.repository import get_report_data
+from .pdf.comparative_report import build_report_data
+from .pdf.generator import generate_comparative_pdf
 
 
 load_dotenv()
@@ -88,8 +92,8 @@ async def create_local_search(
     db.commit()
     db.refresh(search)
 
-    # De momento no implementamos scraping real; dejamos hook para futuro.
-    # Aquí se llamaría a un motor que consulta APIs/directorios y guarda PriceRecord.
+    # Ejecutar scraping (mock que genera precios de ejemplo por producto/fuente)
+    run_mock_scraping(db, search)
 
     return {"search_id": search.id, "center_lat": center_lat, "center_lng": center_lng}
 
@@ -129,6 +133,33 @@ def list_prices_for_search(
         "center_lng": search.center_lng,
         "items": [to_dict(r) for r in records],
     }
+
+
+@app.get("/report/{search_id}", response_class=HTMLResponse)
+def report_page(request: Request, search_id: int, db: Session = Depends(get_db)):
+    """Vista del informe comparativo con tabla y enlace para descargar PDF."""
+    data = get_report_data(db, search_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="Búsqueda no encontrada")
+    return templates.TemplateResponse(
+        "report.html",
+        {"request": request, "search_id": search_id, "report": data},
+    )
+
+
+@app.get("/api/reports/{search_id}/pdf")
+def download_comparative_pdf(search_id: int, db: Session = Depends(get_db)):
+    """Genera y devuelve el PDF del informe comparativo."""
+    data = build_report_data(db, search_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="Búsqueda no encontrada")
+    buffer = generate_comparative_pdf(data)
+    filename = f"informe-precios-{search_id}.pdf"
+    return StreamingResponse(
+        buffer,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.get("/health")
