@@ -98,18 +98,24 @@ def get_report_data(db: Session, search_id: int) -> dict:
     sources_list = sorted(sources_set)
     IVA_PCT = 21.0
 
-    rows = []
+    rows: list[dict[str, object]] = []
     subtotal = 0.0
     for product_name, prices_by_source in sorted(by_product.items()):
-        # Usar precio mínimo entre fuentes para el total (o el primero si solo hay uno)
-        prices = list(prices_by_source.values())
-        min_price = min(prices) if prices else 0.0
+        # Usar precio mínimo entre fuentes para el total y guardar el nombre de la tienda
+        min_price = 0.0
+        min_source_name: Optional[str] = None
+        for sname, price in prices_by_source.items():
+            if min_source_name is None or price < min_price:
+                min_price = price
+                min_source_name = sname
+
         iva = round(min_price * (IVA_PCT / 100), 2)
         total_con_iva = round(min_price + iva, 2)
         subtotal += min_price
         row = {
             "product_name": product_name,
             "prices_by_source": prices_by_source,
+            "best_source_name": min_source_name,
             "min_price": min_price,
             "iva_pct": IVA_PCT,
             "iva": iva,

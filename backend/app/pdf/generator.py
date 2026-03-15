@@ -50,18 +50,20 @@ def generate_comparative_pdf(data: dict[str, Any]) -> BytesIO:
     products = data.get("products", [])
     currency = data.get("currency", "EUR")
 
-    # Tabla: Producto | Fuente1 | Fuente2 | ... | IVA (%) | Total con IVA
-    headers = ["Producto / Servicio"] + sources + ["IVA (%)", f"Total ({currency})"]
+    # Tabla: Producto | Fuente1 | Fuente2 | ... | Tienda (mín.) | IVA (%) | Total con IVA
+    headers = ["Producto / Servicio"] + sources + ["Tienda (mín.)", "IVA (%)", f"Total ({currency})"]
     table_data = [headers]
 
     for row in products:
         pname = row.get("product_name", "")
         prices_by_source = row.get("prices_by_source", {})
+        best_source = row.get("best_source_name") or "-"
         iva_pct = row.get("iva_pct", 21)
         total_con_iva = row.get("total_con_iva", 0)
         cells = [pname]
         for s in sources:
             cells.append(str(prices_by_source.get(s, "-")))
+        cells.append(str(best_source))
         cells.append(str(iva_pct))
         cells.append(str(total_con_iva))
         table_data.append(cells)
@@ -70,11 +72,11 @@ def generate_comparative_pdf(data: dict[str, Any]) -> BytesIO:
     subtotal = data.get("subtotal", 0)
     iva_total = data.get("iva_total", 0)
     total = data.get("total", 0)
-    total_row = [Paragraph("<b>SUBTOTAL</b>", styles["Normal"])] + [""] * len(sources) + [""] + [f"{subtotal:.2f}"]
+    total_row = [Paragraph("<b>SUBTOTAL</b>", styles["Normal"])] + [""] * len(sources) + [""] + [""] + [f"{subtotal:.2f}"]
     table_data.append(total_row)
-    total_row2 = [Paragraph("<b>IVA</b>", styles["Normal"])] + [""] * len(sources) + [""] + [f"{iva_total:.2f}"]
+    total_row2 = [Paragraph("<b>IVA</b>", styles["Normal"])] + [""] * len(sources) + [""] + [""] + [f"{iva_total:.2f}"]
     table_data.append(total_row2)
-    total_row3 = [Paragraph("<b>TOTAL</b>", styles["Normal"])] + [""] * len(sources) + [""] + [f"{total:.2f}"]
+    total_row3 = [Paragraph("<b>TOTAL</b>", styles["Normal"])] + [""] * len(sources) + [""] + [""] + [f"{total:.2f}"]
     table_data.append(total_row3)
 
     t = Table(table_data, repeatRows=1)

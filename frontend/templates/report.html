@@ -16,6 +16,7 @@
           {% for s in report.sources %}
           <th>{{ s }}</th>
           {% endfor %}
+          <th>Tienda (mín.)</th>
           <th>IVA (%)</th>
           <th>Total ({{ report.currency }})</th>
         </tr>
@@ -27,6 +28,7 @@
           {% for s in report.sources %}
           <td>{{ row.prices_by_source.get(s, "-") }}</td>
           {% endfor %}
+          <td>{{ row.best_source_name or "-" }}</td>
           <td>{{ row.iva_pct }}</td>
           <td>{{ row.total_con_iva }}</td>
         </tr>
@@ -35,17 +37,20 @@
           <td><strong>SUBTOTAL</strong></td>
           {% for s in report.sources %}<td></td>{% endfor %}
           <td></td>
+          <td></td>
           <td><strong>{{ report.subtotal }}</strong></td>
         </tr>
         <tr>
           <td><strong>IVA</strong></td>
           {% for s in report.sources %}<td></td>{% endfor %}
           <td></td>
+          <td></td>
           <td><strong>{{ report.iva_total }}</strong></td>
         </tr>
         <tr>
           <td><strong>TOTAL</strong></td>
           {% for s in report.sources %}<td></td>{% endfor %}
+          <td></td>
           <td></td>
           <td><strong>{{ report.total }}</strong></td>
         </tr>
